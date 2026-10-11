@@ -1,0 +1,141 @@
+@import "tailwindcss";
+
+:root {
+  --gold: #B8963E;
+  --gold-light: #D4AF6A;
+  --gold-pale: #F5EDD6;
+  --cream: #FEFAF4;
+  --cream2: #FDF4E7;
+  --rose: #C8756B;
+  --rose-light: #E8AFA9;
+  --brown: #3D2B1F;
+  --muted: #9B8060;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  background-color: var(--cream);
+  color: var(--brown);
+}
+
+.font-display {
+  font-family: 'Georgia', serif;
+  letter-spacing: 0.02em;
+}
+
+.font-body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ─── Background romantis ─── */
+.bg-romantic {
+  background: linear-gradient(160deg, #FEFAF4 0%, #FDF4E7 35%, #FBF0E4 65%, #FEFAF4 100%);
+}
+
+/* ─── Gold shimmer button ─── */
+.btn-primary {
+  background: linear-gradient(135deg, #C9A84C 0%, #E2C97E 45%, #B8963E 100%);
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  box-shadow: 0 4px 24px rgba(184, 150, 62, 0.45);
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+  border: none;
+  cursor: pointer;
+}
+.btn-primary:active {
+  transform: scale(0.97);
+  box-shadow: 0 2px 12px rgba(184, 150, 62, 0.3);
+}
+
+/* ─── Outline button ─── */
+.btn-outline {
+  background: transparent;
+  color: var(--muted);
+  border: 1.5px solid #D4C4A8;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+.btn-outline:active {
+  transform: scale(0.97);
+  background: rgba(212, 175, 106, 0.08);
+}
+
+/* ─── Glass card ─── */
+.card {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(212, 175, 106, 0.25);
+  box-shadow: 0 2px 20px rgba(184, 150, 62, 0.08), 0 1px 4px rgba(0,0,0,0.04);
+  backdrop-filter: blur(12px);
+}
+
+/* ─── Gold divider ─── */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--gold-light);
+  font-size: 12px;
+}
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #D4AF6A80, transparent);
+}
+
+/* ─── Token dot ─── */
+.token-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+}
+.token-dot.active {
+  background: linear-gradient(135deg, #D4AF6A, #B8963E);
+  box-shadow: 0 0 8px rgba(184, 150, 62, 0.5);
+}
+.token-dot.used {
+  background: #E8E0D0;
+}
+
+/* ─── Petal ─── */
+.petal {
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  animation: petalFall linear infinite;
+  user-select: none;
+}
+
+@keyframes petalFall {
+  0%   { transform: translateY(-5vh) rotate(0deg) translateX(0px); opacity: 0; }
+  5%   { opacity: 0.7; }
+  95%  { opacity: 0.3; }
+  100% { transform: translateY(105vh) rotate(480deg) translateX(30px); opacity: 0; }
+}
+
+/* ─── Shutter ring pulse ─── */
+@keyframes ringPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.5); }
+  60%       { box-shadow: 0 0 0 10px rgba(255,255,255,0); }
+}
+.shutter { animation: ringPulse 2.5s ease-in-out infinite; }
+
+/* ─── Scroll bar ─── */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-thumb { background: #D4AF6A40; border-radius: 4px; }
