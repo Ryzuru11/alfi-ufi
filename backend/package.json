@@ -1,0 +1,21 @@
+{
+  "name": "foto-nikah-alfi-ufi-backend",
+  "version": "1.0.0",
+  "description": "Backend API untuk foto booth nikah Alfi & Ufi",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "googleapis": "^140.0.1",
+    "multer": "^2.0.0",
+    "uuid": "^11.1.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}

@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment files (JANGAN di-upload ke GitHub!)
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env.local
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# Build
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials (JANGAN di-upload!)
+*.json.key
+get-refresh-token.js
