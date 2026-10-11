@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import FloatingPetals from "./components/FloatingPetals";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API_URL = "";
 const MAX_TOKENS = 5;
 
 type AppState = "welcome" | "camera" | "preview" | "uploading" | "success" | "done";
