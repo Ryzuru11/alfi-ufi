@@ -84,6 +84,8 @@ export default function Page() {
       // Assign ke video element
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Force play untuk mobile browser
+        try { await videoRef.current.play(); } catch { /* autoplay policy, ok */ }
       }
       setFacing(mode);
       setState("camera");
@@ -237,53 +239,110 @@ export default function Page() {
   // CAMERA
   // ════════════════════════════════════════════
   if (state === "camera") return (
-    <main className="fixed inset-0 flex flex-col bg-black overflow-hidden" style={{ height: '100dvh' }}>
-      {/* Flash */}
+    <main
+      className="bg-black"
+      style={{
+        position: "fixed", inset: 0,
+        display: "flex", flexDirection: "column",
+        height: "100dvh", overflow: "hidden",
+        WebkitUserSelect: "none", userSelect: "none",
+      }}
+    >
+      {/* Flash overlay */}
       <AnimatePresence>
-        {flash && <motion.div initial={{ opacity: 0.9 }} animate={{ opacity: 0 }} exit={{ opacity: 0 }}
-          transition={{ duration: 0.25 }} className="absolute inset-0 bg-white z-50 pointer-events-none" />}
+        {flash && (
+          <motion.div
+            initial={{ opacity: 1 }} animate={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            style={{ position: "absolute", inset: 0, background: "white", zIndex: 50, pointerEvents: "none" }}
+          />
+        )}
       </AnimatePresence>
 
       {/* Top bar */}
-      <div className="absolute top-0 inset-x-0 z-20 flex items-center justify-between px-4 py-3
-        bg-gradient-to-b from-black/70 to-transparent">
-        <button onClick={() => { stopStream(); setState("welcome"); }}
-          className="font-body text-white/75 text-sm bg-white/10 px-3 py-1.5 rounded-full border border-white/15">
+      <div style={{
+        position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "12px 16px",
+        background: "linear-gradient(to bottom, rgba(0,0,0,0.65), transparent)",
+      }}>
+        <button
+          onClick={() => { stopStream(); setState("welcome"); }}
+          style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 999, padding: "6px 14px" }}
+        >
           ← Kembali
         </button>
-        <div className="flex gap-1.5">
+
+        {/* Token dots */}
+        <div style={{ display: "flex", gap: 6 }}>
           {Array.from({ length: MAX_TOKENS }, (_, i) => (
-            <div key={i} className={`token-dot ${i < tokensLeft ? "active" : "used"}`} />
+            <div key={i} style={{
+              width: 10, height: 10, borderRadius: "50%",
+              background: i < tokensLeft
+                ? "linear-gradient(135deg, #D4AF6A, #B8963E)"
+                : "rgba(255,255,255,0.2)",
+              boxShadow: i < tokensLeft ? "0 0 6px rgba(212,175,106,0.7)" : "none",
+            }} />
           ))}
         </div>
-        <button onClick={flipCam}
-          className="font-body text-white/75 text-sm bg-white/10 px-3 py-1.5 rounded-full border border-white/15">
-          🔄
+
+        <button
+          onClick={flipCam}
+          style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 999, padding: "6px 14px" }}
+        >
+          🔄 Balik
         </button>
       </div>
 
-      {/* Video */}
-      <div className="flex-1 relative">
-        <video ref={videoRef} autoPlay playsInline muted
-          className={`w-full h-full object-cover ${facing === "user" ? "scale-x-[-1]" : ""}`} />
-        {/* Grid thirds */}
-        <div className="absolute inset-0 pointer-events-none"
-          style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.07) 1px,transparent 1px)", backgroundSize: "33.33% 33.33%" }} />
+      {/* Video — flex-1 mengisi sisa ruang */}
+      <div style={{ flex: 1, position: "relative", overflow: "hidden", minHeight: 0 }}>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{
+            width: "100%", height: "100%",
+            objectFit: "cover",
+            display: "block",
+            // Mirror hanya via transform, bukan scale class CSS
+            transform: facing === "user" ? "scaleX(-1)" : "none",
+          }}
+        />
       </div>
 
-      {/* Bottom — shutter */}
-      <div className="bg-black/80 pb-10 pt-6 flex flex-col items-center gap-2">
-        <p className="font-body text-white/40 text-xs tracking-widest mb-1">
-          {tokensLeft} kesempatan foto tersisa
+      {/* Bottom shutter — tinggi fixed biar tidak terpotong */}
+      <div style={{
+        flexShrink: 0,
+        background: "rgba(0,0,0,0.85)",
+        paddingTop: 20, paddingBottom: 36,
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+      }}>
+        <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 11, letterSpacing: "0.15em", textTransform: "uppercase" }}>
+          {tokensLeft} kesempatan tersisa
         </p>
-        <button onClick={capture}
-          className="shutter w-20 h-20 rounded-full border-4 border-white/80 flex items-center justify-center active:scale-95 transition-transform">
-          <div className="w-14 h-14 rounded-full bg-white" />
+
+        {/* Shutter button */}
+        <button
+          onClick={capture}
+          style={{
+            width: 80, height: 80, borderRadius: "50%",
+            border: "4px solid rgba(255,255,255,0.85)",
+            background: "transparent",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", WebkitTapHighlightColor: "transparent",
+            boxShadow: "0 0 0 0 rgba(255,255,255,0.4)",
+            animation: "ringPulse 2.5s ease-in-out infinite",
+          }}
+          aria-label="Ambil foto"
+        >
+          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "white" }} />
         </button>
-        <p className="font-body text-white/30 text-xs mt-1">Ketuk untuk foto</p>
+
+        <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }}>Ketuk untuk foto</p>
       </div>
 
-      <canvas ref={canvasRef} className="hidden" />
+      <canvas ref={canvasRef} style={{ display: "none" }} />
     </main>
   );
 
