@@ -59,56 +59,62 @@ export default function Page() {
     streamRef.current = null;
   }, []);
 
-  // Assign stream ke video element setelah camera state render
+  // Assign stream ke video setelah render
   useEffect(() => {
     if (state !== "camera") return;
-    if (!videoRef.current || !streamRef.current) return;
-
     const video = videoRef.current;
     const stream = streamRef.current;
+    if (!video || !stream) return;
+
+    // Kalau sudah ada stream yang sama, skip
+    if (video.srcObject === stream) return;
 
     video.srcObject = stream;
+    const play = () => { video.play().catch(() => {}); };
+    video.addEventListener("loadedmetadata", play, { once: true });
+    if (video.readyState >= 2) play();
 
-    const handleReady = async () => {
-      try { await video.play(); } catch { /* ok */ }
-    };
-
-    video.addEventListener("loadedmetadata", handleReady);
-    // Fallback langsung
-    if (video.readyState >= 1) {
-      handleReady();
-    }
-
-    return () => {
-      video.removeEventListener("loadedmetadata", handleReady);
-    };
-  }, [state]);
+    return () => video.removeEventListener("loadedmetadata", play);
+  }, [state, facing]); // re-run juga saat facing berubah
 
   useEffect(() => () => stopStream(), [stopStream]);
 
   const openCamera = useCallback(async (mode: "environment" | "user") => {
     setError(null);
-    // Stop stream lama
+
+    // Stop semua track lama
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
 
+    // Reset video element
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const constraints = {
         video: {
           facingMode: { ideal: mode },
           width: { ideal: 1920 },
           height: { ideal: 1080 },
         },
         audio: false,
-      });
+      };
 
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       facingRef.current = mode;
       setFacing(mode);
+
+      // Langsung assign jika video element sudah ada di DOM
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+
       setState("camera");
-      // videoRef akan di-assign setelah setState render,
-      // ditangani oleh useEffect di bawah
-    } catch {
+    } catch (err) {
+      console.error("Camera error:", err);
       setError("Izinkan akses kamera di browser ya, lalu coba lagi.");
     }
   }, []);
@@ -183,22 +189,22 @@ export default function Page() {
     }
   };
 
-  const retake = () => {
+  const retake = useCallback(() => {
     if (imgUrl) URL.revokeObjectURL(imgUrl);
     setImgUrl(null); setImgBlob(null);
     openCamera(facingRef.current);
-  };
+  }, [imgUrl, openCamera]);
 
-  const nextSnap = () => {
+  const nextSnap = useCallback(() => {
     if (imgUrl) URL.revokeObjectURL(imgUrl);
     setImgUrl(null); setImgBlob(null);
     openCamera(facingRef.current);
-  };
+  }, [imgUrl, openCamera]);
 
-  const flipCam = () => {
+  const flipCam = useCallback(() => {
     const newMode = facingRef.current === "environment" ? "user" : "environment";
     openCamera(newMode);
-  };
+  }, [openCamera]);
 
   const resetAndStart = () => {
     localStorage.removeItem(STORAGE_KEY);
