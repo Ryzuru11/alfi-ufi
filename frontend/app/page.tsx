@@ -56,25 +56,43 @@ export default function Page() {
   useEffect(() => { if (session) localStorage.setItem("fs", JSON.stringify(session)); }, [session]);
 
   // ── helpers ──
-  const stopStream = () => { streamRef.current?.getTracks().forEach(t => t.stop()); streamRef.current = null; };
+  const stopStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  // Simpan facing di ref agar selalu current tanpa trigger re-render
+  const facingRef = useRef<"environment" | "user">("environment");
 
   const openCamera = useCallback(async (mode: "environment" | "user") => {
     setError(null);
+    // Stop stream lama dulu
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+
     try {
-      stopStream();
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: mode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: {
+          facingMode: { ideal: mode },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
         audio: false,
       });
       streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
+      facingRef.current = mode;
+      // Assign ke video element
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setFacing(mode);
       setState("camera");
     } catch {
       setError("Izinkan akses kamera di browser ya, lalu coba lagi.");
     }
-  }, []);
+  }, [stopStream]);
 
-  useEffect(() => () => stopStream(), []);
+  useEffect(() => () => stopStream(), [stopStream]);
 
   const startNew = async () => {
     setError(null);
@@ -83,7 +101,7 @@ export default function Page() {
       if (!r.ok) throw new Error();
       const d: Session = await r.json();
       setSession(d);
-      openCamera(facing);
+      await openCamera("environment");
     } catch { setError("Server tidak bisa dihubungi. Coba lagi!"); }
   };
 
@@ -91,9 +109,14 @@ export default function Page() {
     const v = videoRef.current; const c = canvasRef.current;
     if (!v || !c) return;
     setFlash(true); setTimeout(() => setFlash(false), 250);
-    c.width = v.videoWidth; c.height = v.videoHeight;
+    c.width = v.videoWidth || 1280;
+    c.height = v.videoHeight || 720;
     const ctx = c.getContext("2d")!;
-    if (facing === "user") { ctx.translate(c.width, 0); ctx.scale(-1, 1); }
+    // Mirror kalau kamera depan
+    if (facingRef.current === "user") {
+      ctx.translate(c.width, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(v, 0, 0);
     c.toBlob(blob => {
       if (!blob) return;
@@ -116,7 +139,7 @@ export default function Page() {
       const r = await fetch(`${API_URL}/api/photo/upload`, { method: "POST", body: fd });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      setUploadCount(c => c + 1);
+      setUploadCount(cnt => cnt + 1);
       setSession(prev => prev ? { ...prev, tokensRemaining: d.tokensRemaining, photosUploaded: d.photosUploaded } : prev);
       setState(d.tokensRemaining <= 0 ? "done" : "success");
     } catch (e: unknown) {
@@ -125,9 +148,23 @@ export default function Page() {
     }
   };
 
-  const retake = () => { if (imgUrl) URL.revokeObjectURL(imgUrl); setImgUrl(null); setImgBlob(null); openCamera(facing); };
-  const nextSnap = () => { if (imgUrl) URL.revokeObjectURL(imgUrl); setImgUrl(null); setImgBlob(null); openCamera(facing); };
-  const flipCam = () => { const m = facing === "environment" ? "user" : "environment"; setFacing(m); openCamera(m); };
+  const retake = () => {
+    if (imgUrl) URL.revokeObjectURL(imgUrl);
+    setImgUrl(null); setImgBlob(null);
+    openCamera(facingRef.current);
+  };
+
+  const nextSnap = () => {
+    if (imgUrl) URL.revokeObjectURL(imgUrl);
+    setImgUrl(null); setImgBlob(null);
+    openCamera(facingRef.current);
+  };
+
+  // Flip kamera — langsung buka mode baru tanpa setState dulu
+  const flipCam = () => {
+    const newMode = facingRef.current === "environment" ? "user" : "environment";
+    openCamera(newMode);
+  };
 
   const tokensLeft = session?.tokensRemaining ?? MAX_TOKENS;
 
