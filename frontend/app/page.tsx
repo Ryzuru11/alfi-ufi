@@ -59,6 +59,31 @@ export default function Page() {
     streamRef.current = null;
   }, []);
 
+  // Assign stream ke video element setelah camera state render
+  useEffect(() => {
+    if (state !== "camera") return;
+    if (!videoRef.current || !streamRef.current) return;
+
+    const video = videoRef.current;
+    const stream = streamRef.current;
+
+    video.srcObject = stream;
+
+    const handleReady = async () => {
+      try { await video.play(); } catch { /* ok */ }
+    };
+
+    video.addEventListener("loadedmetadata", handleReady);
+    // Fallback langsung
+    if (video.readyState >= 1) {
+      handleReady();
+    }
+
+    return () => {
+      video.removeEventListener("loadedmetadata", handleReady);
+    };
+  }, [state]);
+
   useEffect(() => () => stopStream(), [stopStream]);
 
   const openCamera = useCallback(async (mode: "environment" | "user") => {
@@ -79,14 +104,10 @@ export default function Page() {
 
       streamRef.current = stream;
       facingRef.current = mode;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        try { await videoRef.current.play(); } catch { /* ok */ }
-      }
-
       setFacing(mode);
       setState("camera");
+      // videoRef akan di-assign setelah setState render,
+      // ditangani oleh useEffect di bawah
     } catch {
       setError("Izinkan akses kamera di browser ya, lalu coba lagi.");
     }
