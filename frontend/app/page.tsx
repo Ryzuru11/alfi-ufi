@@ -35,9 +35,21 @@ export default function Page() {
     if (!s) return;
     try {
       const p: Session = JSON.parse(s);
-      setSession(p);
-      setUploadCount(p.photosUploaded || 0);
-      if (p.tokensRemaining <= 0) setState("done");
+      // Verifikasi sesi masih valid di server
+      fetch(`${API_URL}/api/session/${p.sessionId}`)
+        .then(r => {
+          if (!r.ok) throw new Error("expired");
+          return r.json();
+        })
+        .then((data: Session) => {
+          setSession(data);
+          setUploadCount(data.photosUploaded || 0);
+          if (data.tokensRemaining <= 0) setState("done");
+        })
+        .catch(() => {
+          // Sesi expired atau server restart, hapus
+          localStorage.removeItem("fs");
+        });
     } catch { localStorage.removeItem("fs"); }
   }, []);
 
@@ -188,7 +200,7 @@ export default function Page() {
   // CAMERA
   // ════════════════════════════════════════════
   if (state === "camera") return (
-    <main className="h-screen flex flex-col bg-black relative overflow-hidden">
+    <main className="fixed inset-0 flex flex-col bg-black overflow-hidden" style={{ height: '100dvh' }}>
       {/* Flash */}
       <AnimatePresence>
         {flash && <motion.div initial={{ opacity: 0.9 }} animate={{ opacity: 0 }} exit={{ opacity: 0 }}
@@ -242,7 +254,7 @@ export default function Page() {
   // PREVIEW
   // ════════════════════════════════════════════
   if (state === "preview") return (
-    <main className="h-screen flex flex-col bg-black">
+    <main className="fixed inset-0 flex flex-col bg-black" style={{ height: '100dvh' }}>
       <div className="flex-1 relative overflow-hidden">
         {imgUrl && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -276,7 +288,7 @@ export default function Page() {
   // UPLOADING
   // ════════════════════════════════════════════
   if (state === "uploading") return (
-    <main className="h-screen flex items-center justify-center bg-black">
+    <main className="fixed inset-0 flex items-center justify-center bg-black">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center space-y-5 px-6">
         <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.8, repeat: Infinity, ease: "linear" }}
           className="w-14 h-14 rounded-full border-2 border-[#B8963E]/30 border-t-[#D4AF6A] mx-auto" />
