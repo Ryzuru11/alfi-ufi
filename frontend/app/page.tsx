@@ -6,67 +6,64 @@ import FloatingPetals from "./components/FloatingPetals";
 
 const API_URL = "";
 const MAX_TOKENS = 5;
+const STORAGE_KEY = "foto_tokens";
 
 type AppState = "welcome" | "camera" | "preview" | "uploading" | "success" | "done";
-interface Session { sessionId: string; tokensRemaining: number; photosUploaded: number }
 
 const fadeUp = {
   hidden: { opacity: 0, y: 24 },
-  show: (d = 0) => ({ opacity: 1, y: 0, transition: { duration: 0.55, delay: d, ease: [0.22, 1, 0.36, 1] as [number,number,number,number] } }),
+  show: (d = 0) => ({
+    opacity: 1, y: 0,
+    transition: { duration: 0.5, delay: d, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] }
+  }),
 };
 
 export default function Page() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const facingRef = useRef<"environment" | "user">("environment");
 
   const [state, setState] = useState<AppState>("welcome");
-  const [session, setSession] = useState<Session | null>(null);
+  const [tokensLeft, setTokensLeft] = useState(MAX_TOKENS);
+  const [uploadCount, setUploadCount] = useState(0);
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [imgBlob, setImgBlob] = useState<Blob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [facing, setFacing] = useState<"environment" | "user">("environment");
   const [flash, setFlash] = useState(false);
-  const [uploadCount, setUploadCount] = useState(0);
 
-  // Restore session
+  // Load token dari localStorage
   useEffect(() => {
-    const s = localStorage.getItem("fs");
-    if (!s) return;
-    try {
-      const p: Session = JSON.parse(s);
-      // Verifikasi sesi masih valid di server
-      fetch(`${API_URL}/api/session/${p.sessionId}`)
-        .then(r => {
-          if (!r.ok) throw new Error("expired");
-          return r.json();
-        })
-        .then((data: Session) => {
-          setSession(data);
-          setUploadCount(data.photosUploaded || 0);
-          if (data.tokensRemaining <= 0) setState("done");
-        })
-        .catch(() => {
-          // Sesi expired atau server restart, hapus
-          localStorage.removeItem("fs");
-        });
-    } catch { localStorage.removeItem("fs"); }
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const { tokens, uploads } = JSON.parse(saved);
+        setTokensLeft(tokens ?? MAX_TOKENS);
+        setUploadCount(uploads ?? 0);
+        if ((tokens ?? MAX_TOKENS) <= 0) setState("done");
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    }
   }, []);
 
-  useEffect(() => { if (session) localStorage.setItem("fs", JSON.stringify(session)); }, [session]);
+  // Simpan token ke localStorage setiap berubah
+  const saveTokens = useCallback((tokens: number, uploads: number) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tokens, uploads }));
+  }, []);
 
-  // ── helpers ──
+  // ── Camera helpers ──
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
   }, []);
 
-  // Simpan facing di ref agar selalu current tanpa trigger re-render
-  const facingRef = useRef<"environment" | "user">("environment");
+  useEffect(() => () => stopStream(), [stopStream]);
 
   const openCamera = useCallback(async (mode: "environment" | "user") => {
     setError(null);
-    // Stop stream lama dulu
+    // Stop stream lama
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
 
@@ -79,47 +76,41 @@ export default function Page() {
         },
         audio: false,
       });
+
       streamRef.current = stream;
       facingRef.current = mode;
-      // Assign ke video element
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Force play untuk mobile browser
-        try { await videoRef.current.play(); } catch { /* autoplay policy, ok */ }
+        try { await videoRef.current.play(); } catch { /* ok */ }
       }
+
       setFacing(mode);
       setState("camera");
     } catch {
       setError("Izinkan akses kamera di browser ya, lalu coba lagi.");
     }
-  }, [stopStream]);
+  }, []);
 
-  useEffect(() => () => stopStream(), [stopStream]);
-
-  const startNew = async () => {
-    setError(null);
-    try {
-      const r = await fetch(`${API_URL}/api/session/start`, { method: "POST" });
-      if (!r.ok) throw new Error();
-      const d: Session = await r.json();
-      setSession(d);
-      await openCamera("environment");
-    } catch { setError("Server tidak bisa dihubungi. Coba lagi!"); }
-  };
-
+  // ── Actions ──
   const capture = () => {
-    const v = videoRef.current; const c = canvasRef.current;
+    const v = videoRef.current;
+    const c = canvasRef.current;
     if (!v || !c) return;
-    setFlash(true); setTimeout(() => setFlash(false), 250);
+
+    setFlash(true);
+    setTimeout(() => setFlash(false), 250);
+
     c.width = v.videoWidth || 1280;
     c.height = v.videoHeight || 720;
     const ctx = c.getContext("2d")!;
-    // Mirror kalau kamera depan
+
     if (facingRef.current === "user") {
       ctx.translate(c.width, 0);
       ctx.scale(-1, 1);
     }
     ctx.drawImage(v, 0, 0);
+
     c.toBlob(blob => {
       if (!blob) return;
       if (imgUrl) URL.revokeObjectURL(imgUrl);
@@ -131,21 +122,42 @@ export default function Page() {
   };
 
   const sendPhoto = async () => {
-    if (!imgBlob || !session) return;
+    if (!imgBlob) return;
+
+    // Cek token di sisi client
+    if (tokensLeft <= 0) {
+      setError("Token foto kamu sudah habis!");
+      return;
+    }
+
     setState("uploading");
     setError(null);
+
     try {
       const fd = new FormData();
       fd.append("photo", imgBlob, `foto_${Date.now()}.jpg`);
-      fd.append("sessionId", session.sessionId);
-      const r = await fetch(`${API_URL}/api/photo/upload`, { method: "POST", body: fd });
+      fd.append("tokenCount", String(uploadCount + 1));
+
+      const r = await fetch(`${API_URL}/api/photo/upload`, {
+        method: "POST",
+        body: fd,
+      });
+
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
-      setUploadCount(cnt => cnt + 1);
-      setSession(prev => prev ? { ...prev, tokensRemaining: d.tokensRemaining, photosUploaded: d.photosUploaded } : prev);
-      setState(d.tokensRemaining <= 0 ? "done" : "success");
+
+      if (!r.ok) throw new Error(d.error || "Gagal upload");
+
+      // Update token di client
+      const newTokens = tokensLeft - 1;
+      const newUploads = uploadCount + 1;
+      setTokensLeft(newTokens);
+      setUploadCount(newUploads);
+      saveTokens(newTokens, newUploads);
+
+      setState(newTokens <= 0 ? "done" : "success");
+
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Gagal mengirim foto");
+      setError(e instanceof Error ? e.message : "Gagal mengirim foto, coba lagi.");
       setState("preview");
     }
   };
@@ -162,13 +174,17 @@ export default function Page() {
     openCamera(facingRef.current);
   };
 
-  // Flip kamera — langsung buka mode baru tanpa setState dulu
   const flipCam = () => {
     const newMode = facingRef.current === "environment" ? "user" : "environment";
     openCamera(newMode);
   };
 
-  const tokensLeft = session?.tokensRemaining ?? MAX_TOKENS;
+  const resetAndStart = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    setTokensLeft(MAX_TOKENS);
+    setUploadCount(0);
+    openCamera("environment");
+  };
 
   // ════════════════════════════════════════════
   // WELCOME
@@ -176,10 +192,8 @@ export default function Page() {
   if (state === "welcome") return (
     <main className="min-h-screen bg-romantic flex flex-col items-center justify-center px-5 relative overflow-hidden">
       <FloatingPetals />
-
       <div className="w-full max-w-xs relative z-10 flex flex-col items-center gap-5">
 
-        {/* ── Hero ── */}
         <motion.div variants={fadeUp} initial="hidden" animate="show" custom={0} className="text-center">
           <div className="text-5xl mb-3">💍</div>
           <p className="font-body text-xs tracking-[0.25em] text-[#B8963E] uppercase mb-1">The Wedding of</p>
@@ -189,27 +203,26 @@ export default function Page() {
           <div className="divider mt-3"><span>✦</span></div>
         </motion.div>
 
-        {/* ── Card info ── */}
         <motion.div variants={fadeUp} initial="hidden" animate="show" custom={0.15}
           className="card rounded-3xl p-5 w-full text-center space-y-3">
           <p className="font-body text-xs text-[#9B8060] tracking-widest uppercase">Kamu mendapat</p>
-
-          {/* Token dots */}
           <div className="flex justify-center gap-2">
             {Array.from({ length: MAX_TOKENS }, (_, i) => (
-              <motion.div key={i} className="token-dot active"
+              <motion.div key={i}
+                className={`token-dot ${i < tokensLeft ? "active" : "used"}`}
                 initial={{ scale: 0 }} animate={{ scale: 1 }}
-                transition={{ delay: 0.3 + i * 0.07, type: "spring", stiffness: 260, damping: 18 }} />
+                transition={{ delay: 0.3 + i * 0.07, type: "spring", stiffness: 260, damping: 18 }}
+              />
             ))}
           </div>
-
-          <p className="font-display text-3xl text-[#B8963E]">5 Foto Gratis</p>
+          <p className="font-display text-3xl text-[#B8963E]">
+            {tokensLeft === MAX_TOKENS ? `${MAX_TOKENS} Foto Gratis` : `${tokensLeft} Foto Tersisa`}
+          </p>
           <p className="font-body text-xs text-[#9B8060] leading-relaxed">
             Foto kamu langsung tersimpan sebagai kenangan kami bersama 🌸
           </p>
         </motion.div>
 
-        {/* ── Error ── */}
         <AnimatePresence>
           {error && (
             <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
@@ -219,17 +232,16 @@ export default function Page() {
           )}
         </AnimatePresence>
 
-        {/* ── CTA ── */}
         <motion.button variants={fadeUp} initial="hidden" animate="show" custom={0.3}
-          onClick={session && tokensLeft > 0 ? () => openCamera(facing) : startNew}
+          onClick={() => openCamera("environment")}
           className="btn-primary w-full py-4 rounded-2xl text-base"
         >
-          {session && tokensLeft > 0 ? `📷  Lanjut Foto  ·  ${tokensLeft} sisa` : "📷  Mulai Foto"}
+          {tokensLeft > 0 ? `📷  Mulai Foto` : "Token Habis"}
         </motion.button>
 
         <motion.p variants={fadeUp} initial="hidden" animate="show" custom={0.4}
           className="font-body text-xs text-[#B8963E] opacity-50 tracking-widest">
-          Dengan penuh cinta  ✦  Alfi &amp; Ufi
+          Dengan penuh cinta ✦ Alfi &amp; Ufi
         </motion.p>
       </div>
     </main>
@@ -239,23 +251,17 @@ export default function Page() {
   // CAMERA
   // ════════════════════════════════════════════
   if (state === "camera") return (
-    <main
-      className="bg-black"
-      style={{
-        position: "fixed", inset: 0,
-        display: "flex", flexDirection: "column",
-        height: "100dvh", overflow: "hidden",
-        WebkitUserSelect: "none", userSelect: "none",
-      }}
-    >
-      {/* Flash overlay */}
+    <main style={{
+      position: "fixed", inset: 0, height: "100dvh",
+      display: "flex", flexDirection: "column",
+      background: "#000", overflow: "hidden",
+      WebkitUserSelect: "none", userSelect: "none",
+    }}>
+      {/* Flash */}
       <AnimatePresence>
         {flash && (
-          <motion.div
-            initial={{ opacity: 1 }} animate={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-            style={{ position: "absolute", inset: 0, background: "white", zIndex: 50, pointerEvents: "none" }}
-          />
+          <motion.div initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.25 }}
+            style={{ position: "absolute", inset: 0, background: "white", zIndex: 50, pointerEvents: "none" }} />
         )}
       </AnimatePresence>
 
@@ -266,79 +272,53 @@ export default function Page() {
         padding: "12px 16px",
         background: "linear-gradient(to bottom, rgba(0,0,0,0.65), transparent)",
       }}>
-        <button
-          onClick={() => { stopStream(); setState("welcome"); }}
-          style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 999, padding: "6px 14px" }}
-        >
+        <button onClick={() => { stopStream(); setState("welcome"); }}
+          style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 999, padding: "6px 14px" }}>
           ← Kembali
         </button>
-
-        {/* Token dots */}
         <div style={{ display: "flex", gap: 6 }}>
           {Array.from({ length: MAX_TOKENS }, (_, i) => (
             <div key={i} style={{
               width: 10, height: 10, borderRadius: "50%",
-              background: i < tokensLeft
-                ? "linear-gradient(135deg, #D4AF6A, #B8963E)"
-                : "rgba(255,255,255,0.2)",
+              background: i < tokensLeft ? "linear-gradient(135deg,#D4AF6A,#B8963E)" : "rgba(255,255,255,0.2)",
               boxShadow: i < tokensLeft ? "0 0 6px rgba(212,175,106,0.7)" : "none",
             }} />
           ))}
         </div>
-
-        <button
-          onClick={flipCam}
-          style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 999, padding: "6px 14px" }}
-        >
+        <button onClick={flipCam}
+          style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 999, padding: "6px 14px" }}>
           🔄 Balik
         </button>
       </div>
 
-      {/* Video — flex-1 mengisi sisa ruang */}
+      {/* Video */}
       <div style={{ flex: 1, position: "relative", overflow: "hidden", minHeight: 0 }}>
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
+        <video ref={videoRef} autoPlay playsInline muted
           style={{
-            width: "100%", height: "100%",
-            objectFit: "cover",
-            display: "block",
-            // Mirror hanya via transform, bukan scale class CSS
+            width: "100%", height: "100%", objectFit: "cover", display: "block",
             transform: facing === "user" ? "scaleX(-1)" : "none",
-          }}
-        />
+          }} />
       </div>
 
-      {/* Bottom shutter — tinggi fixed biar tidak terpotong */}
+      {/* Shutter */}
       <div style={{
-        flexShrink: 0,
-        background: "rgba(0,0,0,0.85)",
+        flexShrink: 0, background: "rgba(0,0,0,0.85)",
         paddingTop: 20, paddingBottom: 36,
         display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
       }}>
         <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 11, letterSpacing: "0.15em", textTransform: "uppercase" }}>
           {tokensLeft} kesempatan tersisa
         </p>
-
-        {/* Shutter button */}
-        <button
-          onClick={capture}
+        <button onClick={capture} aria-label="Ambil foto"
           style={{
             width: 80, height: 80, borderRadius: "50%",
             border: "4px solid rgba(255,255,255,0.85)",
-            background: "transparent",
+            background: "transparent", cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", WebkitTapHighlightColor: "transparent",
-            boxShadow: "0 0 0 0 rgba(255,255,255,0.4)",
-            animation: "ringPulse 2.5s ease-in-out infinite",
-          }}
-          aria-label="Ambil foto"
-        >
+            WebkitTapHighlightColor: "transparent",
+          }}>
           <div style={{ width: 56, height: 56, borderRadius: "50%", background: "white" }} />
         </button>
-
         <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }}>Ketuk untuk foto</p>
       </div>
 
@@ -350,31 +330,34 @@ export default function Page() {
   // PREVIEW
   // ════════════════════════════════════════════
   if (state === "preview") return (
-    <main className="fixed inset-0 flex flex-col bg-black" style={{ height: '100dvh' }}>
-      <div className="flex-1 relative overflow-hidden">
+    <main style={{ position: "fixed", inset: 0, height: "100dvh", display: "flex", flexDirection: "column", background: "#000" }}>
+      <div style={{ flex: 1, position: "relative", overflow: "hidden", minHeight: 0 }}>
         {imgUrl && (
           // eslint-disable-next-line @next/next/no-img-element
-          <motion.img src={imgUrl} alt="Preview" initial={{ opacity: 0, scale: 1.04 }} animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.4 }} className="w-full h-full object-contain" />
+          <motion.img src={imgUrl} alt="Preview"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
         )}
-        <div className="absolute inset-0 pointer-events-none"
-          style={{ background: "radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.45) 100%)" }} />
       </div>
 
       <AnimatePresence>
-        {error && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-          className="font-body mx-4 mb-2 text-sm text-white bg-red-500/90 backdrop-blur rounded-2xl p-3 text-center">
-          {error}
-        </motion.div>}
+        {error && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            style={{ margin: "0 16px 8px", background: "rgba(239,68,68,0.9)", color: "white", borderRadius: 16, padding: "12px 16px", textAlign: "center", fontSize: 14 }}>
+            {error}
+          </motion.div>
+        )}
       </AnimatePresence>
 
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-        className="p-4 flex gap-3 bg-gradient-to-t from-black via-black/90 to-transparent pt-10">
-        <button onClick={retake} className="btn-outline flex-1 py-4 rounded-2xl font-body text-sm text-white/70 border-white/20">
-          🔄  Foto Ulang
+        style={{ flexShrink: 0, padding: "16px 16px 36px", display: "flex", gap: 12, background: "rgba(0,0,0,0.9)" }}>
+        <button onClick={retake}
+          style={{ flex: 1, padding: "16px 0", borderRadius: 20, border: "1.5px solid rgba(255,255,255,0.2)", background: "transparent", color: "rgba(255,255,255,0.75)", fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+          🔄 Foto Ulang
         </button>
-        <button onClick={sendPhoto} className="btn-primary flex-[2] py-4 rounded-2xl font-body">
-          Kirim Foto  ✉️
+        <button onClick={sendPhoto}
+          style={{ flex: 2, padding: "16px 0", borderRadius: 20, border: "none", background: "linear-gradient(135deg,#C9A84C,#E2C97E,#B8963E)", color: "white", fontSize: 15, fontWeight: 600, cursor: "pointer", boxShadow: "0 4px 20px rgba(184,150,62,0.4)" }}>
+          Kirim Foto ✉️
         </button>
       </motion.div>
     </main>
@@ -384,22 +367,20 @@ export default function Page() {
   // UPLOADING
   // ════════════════════════════════════════════
   if (state === "uploading") return (
-    <main className="fixed inset-0 flex items-center justify-center bg-black">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center space-y-5 px-6">
+    <main style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#000" }}>
+      <div style={{ textAlign: "center" }}>
         <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.8, repeat: Infinity, ease: "linear" }}
-          className="w-14 h-14 rounded-full border-2 border-[#B8963E]/30 border-t-[#D4AF6A] mx-auto" />
-        <div>
-          <p className="font-display text-2xl text-white font-light">Mengirim foto...</p>
-          <p className="font-body text-white/40 text-sm mt-1">Tunggu sebentar 🌸</p>
-        </div>
-        <div className="flex justify-center gap-1.5">
-          {[0, 1, 2].map(i => (
-            <motion.div key={i} animate={{ opacity: [0.2, 1, 0.2], scale: [0.8, 1, 0.8] }}
+          style={{ width: 56, height: 56, borderRadius: "50%", border: "3px solid rgba(184,150,62,0.3)", borderTopColor: "#D4AF6A", margin: "0 auto 20px" }} />
+        <p style={{ color: "white", fontFamily: "Georgia,serif", fontSize: 22, fontWeight: 300 }}>Mengirim foto...</p>
+        <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, marginTop: 6 }}>Tunggu sebentar 🌸</p>
+        <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 16 }}>
+          {[0,1,2].map(i => (
+            <motion.div key={i} animate={{ opacity: [0.2,1,0.2], scale: [0.8,1,0.8] }}
               transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
-              className="w-2 h-2 rounded-full bg-[#D4AF6A]" />
+              style={{ width: 8, height: 8, borderRadius: "50%", background: "#D4AF6A" }} />
           ))}
         </div>
-      </motion.div>
+      </div>
     </main>
   );
 
@@ -410,12 +391,10 @@ export default function Page() {
     <main className="min-h-screen bg-romantic flex flex-col items-center justify-center px-5 relative overflow-hidden">
       <FloatingPetals />
       <div className="w-full max-w-xs relative z-10 flex flex-col items-center gap-5">
-
         <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}
           transition={{ type: "spring", stiffness: 220, damping: 14 }}
-          className="w-20 h-20 rounded-full flex items-center justify-center"
-          style={{ background: "linear-gradient(135deg, #D4AF6A, #B8963E)", boxShadow: "0 8px 32px rgba(184,150,62,0.4)" }}>
-          <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg,#D4AF6A,#B8963E)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 32px rgba(184,150,62,0.4)" }}>
+          <svg style={{ width: 40, height: 40, color: "white" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <motion.path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"
               initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.45, delay: 0.2 }} />
           </svg>
@@ -441,7 +420,7 @@ export default function Page() {
 
         <motion.div variants={fadeUp} initial="hidden" animate="show" custom={0.3} className="w-full space-y-2">
           <button onClick={nextSnap} className="btn-primary w-full py-4 rounded-2xl font-body">
-            📸  Foto Lagi
+            📸 Foto Lagi
           </button>
           <button onClick={() => setState("welcome")}
             className="font-body w-full py-2 text-sm text-[#9B8060] hover:text-[#B8963E] transition-colors">
@@ -459,15 +438,12 @@ export default function Page() {
     <main className="min-h-screen bg-romantic flex flex-col items-center justify-center px-5 relative overflow-hidden">
       <FloatingPetals />
       <div className="w-full max-w-xs relative z-10 flex flex-col items-center gap-5">
-
         <motion.div animate={{ scale: [1, 1.06, 1] }} transition={{ duration: 3, repeat: Infinity }}
           className="text-7xl">🌸</motion.div>
-
         <motion.div variants={fadeUp} initial="hidden" animate="show" custom={0} className="text-center">
           <h2 className="font-display text-4xl text-[#3D2B1F] font-light">Terima Kasih!</h2>
           <div className="divider mt-3"><span>✦</span></div>
         </motion.div>
-
         <motion.div variants={fadeUp} initial="hidden" animate="show" custom={0.15}
           className="card rounded-3xl p-6 w-full text-center space-y-2">
           <div className="text-4xl">📷</div>
@@ -476,7 +452,6 @@ export default function Page() {
             Foto kamu akan menjadi kenangan indah bagi Alfi &amp; Ufi 💍
           </p>
         </motion.div>
-
         <motion.div variants={fadeUp} initial="hidden" animate="show" custom={0.3}
           className="w-full rounded-3xl p-5 text-center border border-[#D4AF6A]/30"
           style={{ background: "linear-gradient(135deg, #FDF8F0, #FBF0E4)" }}>
@@ -485,6 +460,11 @@ export default function Page() {
             Mengucapkan terima kasih atas kehadiran<br />dan doa restu kamu 🙏
           </p>
         </motion.div>
+        {/* Reset untuk tamu baru */}
+        <button onClick={resetAndStart}
+          className="font-body text-xs text-[#B8963E]/40 py-2">
+          Tamu baru? Mulai dari sini
+        </button>
       </div>
     </main>
   );

@@ -1,73 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, useToken, recordUpload } from "@/lib/sessionStore";
 import { uploadToDrive } from "@/lib/driveService";
 
-export const maxDuration = 60; // 60 detik timeout untuk upload
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
-    const sessionId = formData.get("sessionId") as string;
     const file = formData.get("photo") as File | null;
-
-    if (!sessionId) {
-      return NextResponse.json({ error: "sessionId diperlukan" }, { status: 400 });
-    }
-
-    const session = getSession(sessionId);
-    if (!session) {
-      return NextResponse.json(
-        { error: "Sesi tidak ditemukan. Silakan scan QR ulang." },
-        { status: 404 }
-      );
-    }
-
-    if (session.tokensRemaining <= 0) {
-      return NextResponse.json({ error: "Token foto kamu sudah habis!" }, { status: 403 });
-    }
+    const tokenCount = formData.get("tokenCount") as string; // jumlah foto yang sudah diupload
 
     if (!file) {
       return NextResponse.json({ error: "File foto tidak ditemukan" }, { status: 400 });
     }
 
-    // Validasi tipe file
     if (!file.type.startsWith("image/")) {
       return NextResponse.json({ error: "Hanya file gambar yang diizinkan" }, { status: 400 });
     }
 
-    // Kurangi token
-    const tokenUsed = useToken(sessionId);
-    if (!tokenUsed) {
-      return NextResponse.json({ error: "Token foto kamu sudah habis!" }, { status: 403 });
+    // Validasi ukuran max 15MB
+    const MAX_SIZE = 15 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      return NextResponse.json({ error: "Ukuran foto terlalu besar (max 15MB)" }, { status: 400 });
     }
 
-    // Konversi File ke Buffer
+    // Konversi ke Buffer
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Nama file dengan timestamp
+    // Nama file dengan timestamp + nomor urut
     const now = new Date();
-    const timestamp = now.toISOString().replace(/T/, "_").replace(/:/g, "-").replace(/\..+/, "");
-    const ext = file.name.split(".").pop() || "jpg";
-    const fileName = `foto_${timestamp}_${Math.random().toString(36).substr(2, 5)}.${ext}`;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const timestamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const count = tokenCount ? `_no${tokenCount}` : "";
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const fileName = `foto_${timestamp}${count}_${Math.random().toString(36).substr(2, 4)}.${ext}`;
 
     // Upload ke Google Drive
     const fileInfo = await uploadToDrive(buffer, fileName, file.type);
 
-    // Catat log
-    recordUpload(sessionId, {
-      fileId: fileInfo.id,
-      fileName: fileInfo.name,
-      webViewLink: fileInfo.webViewLink,
-    });
-
-    const updatedSession = getSession(sessionId);
-
     return NextResponse.json({
       success: true,
       message: "Foto berhasil dikirim!",
-      tokensRemaining: updatedSession?.tokensRemaining ?? 0,
-      photosUploaded: updatedSession?.photosUploaded ?? 1,
       file: { name: fileInfo.name, webViewLink: fileInfo.webViewLink },
     });
 
